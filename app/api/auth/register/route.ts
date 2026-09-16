@@ -1,49 +1,35 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { connectDB } from '@/lib/db';
-import { isValidEmail } from '@/lib/validators';
+import { clientKey, rateLimit } from '@/lib/rateLimit';
+import { registerSchema } from '@/lib/validators';
 import User from '@/models/User';
 
-export async function POST(req: NextRequest): Promise<NextResponse> {
+export const dynamic = 'force-dynamic';
+
+export async function POST(req: NextRequest) {
   try {
+    if (!rateLimit(`register:${clientKey(req)}`)) {
+      return NextResponse.json({ error: 'Too many requests' }, { status: 429 });
+    }
+
+    const parsed = registerSchema.safeParse(await req.json().catch(() => null));
+    if (!parsed.success) {
+      return NextResponse.json({ error: parsed.error.issues[0]?.message || 'Invalid input' }, { status: 400 });
+    }
+
     await connectDB();
-    const body = await req.json().catch(() => null);
-
-    if (!body || !body.name || !body.email || !body.password) {
-      return NextResponse.json({ error: 'Name, email, and password are required' }, { status: 400 });
-    }
-
-    const name = String(body.name).trim();
-    const email = String(body.email).trim().toLowerCase();
-    const password = String(body.password);
-
-    if (name.length < 2) {
-      return NextResponse.json({ error: 'Name must be at least 2 characters' }, { status: 400 });
-    }
-
-    if (!isValidEmail(email)) {
-      return NextResponse.json({ error: 'Invalid email address' }, { status: 400 });
-    }
-
-    if (password.length < 8) {
-      return NextResponse.json({ error: 'Password must be at least 8 characters' }, { status: 400 });
-    }
-
-    const existingUser = await User.findOne({ email });
-    if (existingUser) {
+    const exists = await User.findOne({ email: parsed.data.email });
+    if (exists) {
       return NextResponse.json({ error: 'User already exists' }, { status: 409 });
     }
 
-    const user = await User.create({ name, email, password });
-
+    const user = await User.create(parsed.data);
     return NextResponse.json(
-      {
-        message: 'Registered successfully',
-        user: { id: String(user._id), name: user.name, email: user.email },
-      },
+      { message: 'Registered successfully', user: { id: String(user._id), name: user.name, email: user.email } },
       { status: 201 }
     );
   } catch (error) {
-    console.error('Register error:', error);
+    console.error(error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }

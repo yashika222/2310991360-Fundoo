@@ -1,17 +1,9 @@
 import { NextRequest } from 'next/server';
-import { verifyAccessToken } from '@/services/tokenService';
-import type { AuthUser } from '@/types/api';
+import { verifyToken } from '@/services/tokenService';
 
-export function getAuthUser(req: NextRequest): AuthUser | null {
+export function getAuthUser(req: NextRequest) {
   const header = req.headers.get('authorization');
-  let token: string | undefined;
-
-  if (header?.startsWith('Bearer ')) {
-    token = header.slice(7);
-  } else {
-    token = req.cookies.get('token')?.value;
-  }
-
+  const token = header?.startsWith('Bearer ') ? header.slice(7) : req.cookies.get('token')?.value;
   if (!token) return null;
-  return verifyAccessToken(token);
+  return verifyToken(token);
 }

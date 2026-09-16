@@ -1,24 +1,37 @@
-const EMAIL_REGEX = /^\S+@\S+\.\S+$/;
-export const NOTE_COLORS = ['#FFFFFF', '#FEF3C7', '#DBEAFE', '#D1FAE5', '#FCE7F3'] as const;
-export type NoteColor = (typeof NOTE_COLORS)[number];
+import { z } from 'zod';
 
-export function isValidEmail(email: string): boolean {
-  return EMAIL_REGEX.test(email);
-}
+export const registerSchema = z.object({
+  name: z.string().trim().min(2),
+  email: z.string().trim().email().toLowerCase(),
+  password: z.string().min(8),
+});
 
-export function isValidColor(color: string): boolean {
-  return NOTE_COLORS.includes(color as (typeof NOTE_COLORS)[number]);
-}
+export const loginSchema = z.object({
+  email: z.string().trim().email().toLowerCase(),
+  password: z.string().min(1),
+});
 
-export function cleanLabels(labels: unknown): string[] {
-  if (!Array.isArray(labels)) return [];
-  return Array.from(new Set(labels.map((l) => String(l).trim()).filter(Boolean)));
-}
+export const forgotSchema = z.object({
+  email: z.string().trim().email().toLowerCase(),
+});
 
-export function cleanCollaborators(collaborators: unknown): string[] {
-  if (!Array.isArray(collaborators)) return [];
-  const list = collaborators
-    .map((c) => String(c).trim().toLowerCase())
-    .filter((c) => isValidEmail(c));
-  return Array.from(new Set(list)).slice(0, 10);
+export const resetSchema = z.object({
+  token: z.string().min(10),
+  password: z.string().min(8),
+});
+
+export const noteSchema = z.object({
+  title: z.string().trim().min(1).max(200),
+  description: z.string().max(5000).optional().default(''),
+  color: z.enum(['#FFFFFF', '#FEF3C7', '#DBEAFE', '#D1FAE5', '#FCE7F3']).optional().default('#FFFFFF'),
+  labels: z.array(z.string()).optional().default([]),
+  collaborators: z.array(z.string().email()).max(10).optional().default([]),
+});
+
+export const noteUpdateSchema = noteSchema.partial();
+
+export function pageParams(searchParams: URLSearchParams) {
+  const page = Math.max(1, Number(searchParams.get('page') || 1) || 1);
+  const limit = Math.min(50, Math.max(1, Number(searchParams.get('limit') || 10) || 10));
+  return { page, limit, skip: (page - 1) * limit };
 }

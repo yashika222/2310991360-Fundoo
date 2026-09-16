@@ -1,24 +1,14 @@
 import { NextResponse } from 'next/server';
-import { connectDB, getDbState } from '@/lib/db';
-import { logger } from '@/lib/logger';
+import { connectDB, dbStatus } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET(): Promise<NextResponse> {
+export async function GET() {
   try {
     await connectDB();
-    logger.info('Health check ok');
-    return NextResponse.json({
-      status: 'ok',
-      db: getDbState(),
-      uptime: process.uptime(),
-    });
+    return NextResponse.json({ status: 'ok', db: dbStatus(), uptime: process.uptime() });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error';
-    logger.error(`Health check failed: ${message}`);
-    return NextResponse.json(
-      { status: 'down', db: 'disconnected', error: message },
-      { status: 503 }
-    );
+    return NextResponse.json({ status: 'down', db: 'disconnected', error: message }, { status: 503 });
   }
 }

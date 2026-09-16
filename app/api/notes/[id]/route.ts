@@ -1,103 +1,70 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { connectDB } from '@/lib/db';
-import { canAccessNote, isOwner } from '@/lib/noteAccess';
-import { cleanCollaborators, cleanLabels, isValidColor } from '@/lib/validators';
+import { getMainNote, trashNote } from '@/lib/notes';
+import { noteUpdateSchema } from '@/lib/validators';
 import { getAuthUser } from '@/middleware/auth';
-import Note from '@/models/Note';
 
-type RouteParams = { params: { id: string } };
+export const dynamic = 'force-dynamic';
 
-export async function GET(req: NextRequest, { params }: RouteParams): Promise<NextResponse> {
+type Ctx = { params: { id: string } };
+
+export async function GET(req: NextRequest, { params }: Ctx) {
   try {
-    await connectDB();
     const user = getAuthUser(req);
-    if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
+    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-    const note = await Note.findById(params.id);
-    if (!note || !canAccessNote(note, user)) {
-      return NextResponse.json({ error: 'Note not found' }, { status: 404 });
-    }
-
+    await connectDB();
+    const note = await getMainNote(params.id, user);
+    if (!note) return NextResponse.json({ error: 'Note not found' }, { status: 404 });
     return NextResponse.json(note);
   } catch (error) {
-    console.error('GET /api/notes/[id] error:', error);
+    console.error(error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
 
-export async function PATCH(req: NextRequest, context: RouteParams): Promise<NextResponse> {
-  return PUT(req, context);
+export async function PATCH(req: NextRequest, ctx: Ctx) {
+  return PUT(req, ctx);
 }
 
-export async function PUT(req: NextRequest, { params }: RouteParams): Promise<NextResponse> {
+export async function PUT(req: NextRequest, { params }: Ctx) {
   try {
-    await connectDB();
     const user = getAuthUser(req);
-    if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+    const parsed = noteUpdateSchema.safeParse(await req.json().catch(() => null));
+    if (!parsed.success) {
+      return NextResponse.json({ error: parsed.error.issues[0]?.message || 'Invalid note' }, { status: 400 });
     }
 
-    const note = await Note.findById(params.id);
-    if (!note || !canAccessNote(note, user)) {
-      return NextResponse.json({ error: 'Note not found' }, { status: 404 });
+    await connectDB();
+    const note = await getMainNote(params.id, user);
+    if (!note) return NextResponse.json({ error: 'Note not found' }, { status: 404 });
+
+    if (parsed.data.collaborators && String(note.userId) !== user.id) {
+      return NextResponse.json({ error: 'Only the owner can manage collaborators' }, { status: 403 });
     }
 
-    const body = await req.json().catch(() => null);
-    if (!body) {
-      return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
-    }
-
-    if (body.title !== undefined) note.title = String(body.title).trim();
-    if (body.description !== undefined) note.description = String(body.description);
-    if (body.color !== undefined) {
-      if (!isValidColor(body.color)) {
-        return NextResponse.json({ error: 'Invalid color code' }, { status: 400 });
-      }
-      note.color = body.color;
-    }
-    if (body.labels !== undefined) {
-      note.labels = cleanLabels(body.labels);
-    }
-    if (body.collaborators !== undefined) {
-      if (!isOwner(note, user)) {
-        return NextResponse.json({ error: 'Only the note owner can manage collaborators' }, { status: 403 });
-      }
-      note.collaborators = cleanCollaborators(body.collaborators);
-    }
-
+    Object.assign(note, parsed.data);
     await note.save();
     return NextResponse.json(note);
   } catch (error) {
-    console.error('PUT /api/notes/[id] error:', error);
+    console.error(error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
 
-export async function DELETE(req: NextRequest, { params }: RouteParams): Promise<NextResponse> {
+export async function DELETE(req: NextRequest, { params }: Ctx) {
   try {
-    await connectDB();
     const user = getAuthUser(req);
-    if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
+    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-    const note = await Note.findById(params.id);
-    if (!note || !canAccessNote(note, user)) {
-      return NextResponse.json({ error: 'Note not found' }, { status: 404 });
-    }
-
-    if (!isOwner(note, user)) {
-      return NextResponse.json({ error: 'Only the note owner can move it to trash' }, { status: 403 });
-    }
-
-    note.isDeleted = true;
-    await note.save();
-
-    return NextResponse.json({ message: 'Moved to trash successfully', note });
+    await connectDB();
+    const result = await trashNote(params.id, user);
+    if (!result) return NextResponse.json({ error: 'Note not found' }, { status: 404 });
+    return NextResponse.json({ message: 'Deleted from main and archive databases', ...result });
   } catch (error) {
-    console.error('DELETE /api/notes/[id] error:', error);
+    console.error(error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }

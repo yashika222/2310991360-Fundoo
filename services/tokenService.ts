@@ -2,55 +2,45 @@ import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
 import { NextResponse } from 'next/server';
 
-function getJwtSecret(): string {
-  return process.env.JWT_SECRET || 'fundoo_jwt_secret_key_32_characters_long_12345';
+function secret() {
+  return process.env.JWT_SECRET || 'dev_jwt_secret_change_me_32_chars_min';
 }
 
-export function signAccessToken(payload: { id: string; email: string }): string {
-  return jwt.sign(payload, getJwtSecret(), {
-    expiresIn: (process.env.JWT_EXPIRES_IN || '24h') as jwt.SignOptions['expiresIn'],
-  });
+export function signToken(id: string, email: string) {
+  return jwt.sign({ id, email }, secret(), { expiresIn: '24h' });
 }
 
-export function verifyAccessToken(token: string): { id: string; email: string } | null {
+export function verifyToken(token: string) {
   try {
-    const decoded = jwt.verify(token, getJwtSecret());
-    if (typeof decoded === 'object' && decoded !== null && 'id' in decoded && 'email' in decoded) {
-      return { id: String(decoded.id), email: String(decoded.email) };
-    }
-    return null;
+    const data = jwt.verify(token, secret()) as { id: string; email: string };
+    if (!data?.id || !data?.email) return null;
+    return { id: data.id, email: data.email };
   } catch {
     return null;
   }
 }
 
-export function hashToken(token: string): string {
+export function hashToken(token: string) {
   return crypto.createHash('sha256').update(token).digest('hex');
 }
 
-export function createResetToken(): { resetToken: string; hashed: string } {
-  const resetToken = crypto.randomBytes(32).toString('hex');
-  return { resetToken, hashed: hashToken(resetToken) };
+export function makeResetToken() {
+  const token = crypto.randomBytes(32).toString('hex');
+  return { token, hashed: hashToken(token) };
 }
 
-export function setAuthCookie(response: NextResponse, token: string): NextResponse {
-  response.cookies.set('token', token, {
+export function setAuthCookie(res: NextResponse, token: string) {
+  res.cookies.set('token', token, {
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
     sameSite: 'lax',
     path: '/',
-    maxAge: 24 * 60 * 60,
+    maxAge: 60 * 60 * 24,
+    secure: process.env.NODE_ENV === 'production',
   });
-  return response;
+  return res;
 }
 
-export function clearAuthCookie(response: NextResponse): NextResponse {
-  response.cookies.set('token', '', {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax',
-    path: '/',
-    maxAge: 0,
-  });
-  return response;
+export function clearAuthCookie(res: NextResponse) {
+  res.cookies.set('token', '', { httpOnly: true, path: '/', maxAge: 0 });
+  return res;
 }

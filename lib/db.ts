@@ -1,93 +1,59 @@
 import mongoose from 'mongoose';
 import { logger } from '@/lib/logger';
 
-type MongooseCache = {
+type Cache = {
   conn: typeof mongoose | null;
   promise: Promise<typeof mongoose> | null;
 };
 
 declare global {
   // eslint-disable-next-line no-var
-  var mongooseCache: MongooseCache | undefined;
+  var mongooseCache: Cache | undefined;
 }
 
+const cache: Cache = global.mongooseCache || { conn: null, promise: null };
+global.mongooseCache = cache;
+// learn it
 mongoose.set('bufferCommands', false);
 
-const cached: MongooseCache =
-  global.mongooseCache ?? {
-    conn: null,
-    promise: null,
-  };
-
-global.mongooseCache = cached;
-
-const CONNECT_OPTIONS: mongoose.ConnectOptions = {
-  dbName: process.env.MONGODB_DB || 'fundoonotes',
-  serverSelectionTimeoutMS: 5000,
-  connectTimeoutMS: 5000,
-  socketTimeoutMS: 15000,
-  maxPoolSize: 5,
-  bufferCommands: false,
-};
-
-export async function connectDB(): Promise<typeof mongoose> {
-  if (
-    cached.conn &&
-    mongoose.connection.readyState === 1
-  ) {
-    return cached.conn;
+export async function connectDB() {
+  if (cache.conn && mongoose.connection.readyState === 1) {
+    return cache.conn;
   }
 
   const uri = process.env.MONGODB_URI;
-
   if (!uri) {
     throw new Error('MONGODB_URI is not set');
   }
 
-  if (!cached.promise) {
-    logger.info('MongoDB connection starting');
-
-    cached.promise = mongoose.connect(
-      uri,
-      CONNECT_OPTIONS
-    );
+  if (!cache.promise) {
+    logger.info('MongoDB connecting');
+    cache.promise = Promise.race([
+      mongoose.connect(uri, {
+        dbName: process.env.MONGODB_DB || 'fundoonotes',
+        serverSelectionTimeoutMS: 5000,
+        connectTimeoutMS: 5000,
+        socketTimeoutMS: 20000,
+        maxPoolSize: 5,
+        bufferCommands: false,
+      }),
+      new Promise<typeof mongoose>((_, reject) => {
+        setTimeout(() => reject(new Error('MongoDB connection timed out after 8s')), 8000);
+      }),
+    ]);
   }
 
   try {
-    cached.conn = await cached.promise;
-
+    cache.conn = await cache.promise;
     logger.info('MongoDB connected');
-
-    return cached.conn;
+    return cache.conn;
   } catch (error) {
-    cached.promise = null;
-    cached.conn = null;
-
-    const message =
-      error instanceof Error
-        ? error.message
-        : 'Unknown error';
-
-    logger.error(
-      `MongoDB connection failed: ${message}`
-    );
-
+    cache.promise = null;
+    cache.conn = null;
     throw error;
   }
 }
 
-export function getDbState():
-  | 'connected'
-  | 'connecting'
-  | 'disconnected' {
-  switch (mongoose.connection.readyState) {
-    case 1:
-      return 'connected';
-
-    case 2:
-      return 'connecting';
-
-    default:
-      return 'disconnected';
-  }
+export function dbStatus() {
+  return mongoose.connection.readyState === 1 ? 'connected' : 'disconnected';
 }
